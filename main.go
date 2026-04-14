@@ -49,6 +49,7 @@ type AdData struct {
 
 var (
 	//botToken = "8534860816:AAEH3QSbf9bj5vr4ARG7tbusvC70WpZgdqY"
+	//botToken     = "8615833296:AAHD0Xvoz0HOXv42RFxTVzdPcV1ev7JCJ8E"
 	botToken     = "8467228808:AAE6vNO3wu3dvlrnNi2RNy90qwvGp77ErT8"
 	adminState   = make(map[int64]string)
 	userAdData   = make(map[int64]*AdData)
@@ -520,6 +521,28 @@ func handleCallback(bot *tgbotapi.BotAPI, update tgbotapi.Update) {
 			tgbotapi.NewKeyboardButtonRow(
 				tgbotapi.NewKeyboardButton("Tomosha qilish"),
 				tgbotapi.NewKeyboardButton("Yuklab olish"),
+			),
+			tgbotapi.NewKeyboardButtonRow(
+				tgbotapi.NewKeyboardButton("TOMOSHA QILISH"),
+				tgbotapi.NewKeyboardButton("YUKLAB OLISH"),
+			), tgbotapi.NewKeyboardButtonRow(
+				tgbotapi.NewKeyboardButton("🔹Tomosha qilish🔹"),
+				tgbotapi.NewKeyboardButton("🔹Yuklab olish🔹"),
+			), tgbotapi.NewKeyboardButtonRow(
+				tgbotapi.NewKeyboardButton("📥 Tomosha qilish"),
+				tgbotapi.NewKeyboardButton("📥Yuklab olish"),
+			), tgbotapi.NewKeyboardButtonRow(
+				tgbotapi.NewKeyboardButton("Yuklab olish📥"),
+				tgbotapi.NewKeyboardButton("Tomosha qilish📥"),
+			),
+			tgbotapi.NewKeyboardButtonRow(
+				tgbotapi.NewKeyboardButton("✨Tomosha qilish✨"),
+				tgbotapi.NewKeyboardButton("✨Yuklab olish✨"),
+			), tgbotapi.NewKeyboardButtonRow(
+				tgbotapi.NewKeyboardButton("◁ Tomosha qilish ▷"),
+				tgbotapi.NewKeyboardButton("◁ Yuklab olish ▷"),
+			), tgbotapi.NewKeyboardButtonRow(
+				tgbotapi.NewKeyboardButton("Anime koʻrish"),
 			),
 			tgbotapi.NewKeyboardButtonRow(
 				tgbotapi.NewKeyboardButton("❌ Bekor qilish"),
