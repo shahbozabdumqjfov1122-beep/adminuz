@@ -12,6 +12,8 @@ import (
 	tgbotapi "github.com/go-telegram-bot-api/telegram-bot-api/v5"
 )
 
+var userState = make(map[int64]string)
+
 type GlobalStats struct {
 	TotalUsers     int       `json:"total_users"`      // Botni ishlatgan jami adminlar
 	TotalChannels  int       `json:"total_channels"`   // Ulangan jami kanallar
@@ -31,16 +33,22 @@ type ChannelConfig struct {
 	LastPostTime  time.Time `json:"last_post_time"`
 }
 
+type CustomButton struct {
+	Text string
+	Link string
+}
+
 type AdData struct {
 	FileID     string
 	Caption    string
 	IsVideo    bool
 	HasMedia   bool
-	ButtonText string
-	AdLink     string
+	Buttons    []CustomButton // Tugmalar ro'yxati
+	TempButton string         // Vaqtincha matnni saqlab turish uchun (MUHIM)
 }
 
 var (
+	//botToken = "8534860816:AAEH3QSbf9bj5vr4ARG7tbusvC70WpZgdqY"
 	botToken     = "8615833296:AAHD0Xvoz0HOXv42RFxTVzdPcV1ev7JCJ8E"
 	adminState   = make(map[int64]string)
 	userAdData   = make(map[int64]*AdData)
@@ -165,7 +173,6 @@ func handleMessage(bot *tgbotapi.BotAPI, update tgbotapi.Update) {
 					tgbotapi.NewKeyboardButton("◁ Yuklab olish ▷"),
 				), tgbotapi.NewKeyboardButtonRow(
 					tgbotapi.NewKeyboardButton("Anime koʻrish"),
-					tgbotapi.NewKeyboardButton("◁ Yuklab olish ▷"),
 				),
 				tgbotapi.NewKeyboardButtonRow(
 					tgbotapi.NewKeyboardButton("❌ Bekor qilish"),
@@ -180,14 +187,37 @@ func handleMessage(bot *tgbotapi.BotAPI, update tgbotapi.Update) {
 			bot.Send(msg)
 			return
 		case "wait_btn_text":
-			userAdData[userID].ButtonText = text
+			if userAdData[userID] == nil {
+				userAdData[userID] = &AdData{}
+			}
+			// ButtonText o'rniga TempButton ga saqlaymiz (chunki hali link kelmadi)
+			userAdData[userID].TempButton = text
+
 			adminState[userID] = "wait_ad_link"
-			bot.Send(tgbotapi.NewMessage(chatID, "🔗 Tugma linkini yuboring:"))
+			msg := tgbotapi.NewMessage(chatID, "🔗 Endi tugma linkini yuboring:")
+			msg.ReplyMarkup = tgbotapi.NewRemoveKeyboard(true)
+			bot.Send(msg)
 			return
+
 		case "wait_ad_link":
-			userAdData[userID].AdLink = text
+			data := userAdData[userID]
+			if !strings.HasPrefix(text, "http") {
+				bot.Send(tgbotapi.NewMessage(chatID, "⚠️ Xato link! http... bilan boshlansin:"))
+				return
+			}
+
+			// Yangi tugmani ro'yxatga qo'shamiz
+			newBtn := CustomButton{
+				Text: data.TempButton, // Saqlab qo'yilgan matn
+				Link: text,            // Hozir kelgan link
+			}
+			data.Buttons = append(data.Buttons, newBtn)
+
+			adminState[userID] = ""
+			bot.Send(tgbotapi.NewMessage(chatID, "✅ Tugma qo'shildi!"))
 			sendPreview(bot, chatID, userID)
 			return
+
 		case "start_sending":
 			adminState[userID] = "wait_target_channel"
 			// Bu yerda @kanal_nomi dagi pastki chiziqni olib tashladik yoki Markdown'ni to'g'irladik
@@ -213,26 +243,15 @@ func handleMessage(bot *tgbotapi.BotAPI, update tgbotapi.Update) {
 				} else if id, err := strconv.ParseInt(input, 10, 64); err == nil {
 					targetChatID = id
 				} else {
-					// Yordam matni (Sizniki kabi...)
 					bot.Send(tgbotapi.NewMessage(chatID, "⚠️ Iltimos, kanalni to'g'ri ko'rsating!"))
 					return
 				}
 			}
 
-			// ChatConfig yaratish (ID bo'lsa ID dan, bo'lmasa Username dan foydalanadi)
-			var chatConfig tgbotapi.ChatConfig
-			if targetChatID != 0 {
-				chatConfig = tgbotapi.ChatConfig{ChatID: targetChatID}
-			} else {
-				chatConfig = tgbotapi.ChatConfig{SuperGroupUsername: targetChatUsername}
-			}
-
 			// 2. Botning adminligini tekshirish
-			// GetChatMemberConfig ichidagi ChatConfig o'rniga to'g'ridan-to'g'ri maydonlarni bering
 			botMember, err := bot.GetChatMember(tgbotapi.GetChatMemberConfig{
 				ChatConfigWithUser: tgbotapi.ChatConfigWithUser{
-					ChatID: targetChatID,
-					// Agar username ishlatmoqchi bo'lsangiz, ID 0 bo'lishi kerak
+					ChatID:             targetChatID,
 					SuperGroupUsername: targetChatUsername,
 					UserID:             bot.Self.ID,
 				},
@@ -250,18 +269,23 @@ func handleMessage(bot *tgbotapi.BotAPI, update tgbotapi.Update) {
 				return
 			}
 
-			// Tugma yaratish
-			btn := tgbotapi.NewInlineKeyboardButtonURL(data.ButtonText, data.AdLink)
-			keyboard := tgbotapi.NewInlineKeyboardMarkup(tgbotapi.NewInlineKeyboardRow(btn))
+			// --- TUGMALARNI TO'G'RI YARATISH (YANGI QISM) ---
+			var rows [][]tgbotapi.InlineKeyboardButton
+			for _, b := range data.Buttons {
+				// Har bir saqlangan tugmani qatorga qo'shamiz
+				btn := tgbotapi.NewInlineKeyboardButtonURL(b.Text, b.Link)
+				rows = append(rows, tgbotapi.NewInlineKeyboardRow(btn))
+			}
+			keyboard := tgbotapi.NewInlineKeyboardMarkup(rows...)
+			// -----------------------------------------------
 
-			// 4. Xabarni yuborish (ChatID ni aniq o'rnatish)
+			// 4. Xabarni yuborish
 			var sendTo tgbotapi.Chattable
-
-			// Muhim: ChatID ni birinchi marta aniqlab olamiz
 			finalChatID := targetChatID
 			if finalChatID == 0 {
-				// Agar username bo'lsa, ID sini Telegramdan so'rab olamiz
-				chat, _ := bot.GetChat(tgbotapi.ChatInfoConfig{ChatConfig: chatConfig})
+				chat, _ := bot.GetChat(tgbotapi.ChatInfoConfig{
+					ChatConfig: tgbotapi.ChatConfig{SuperGroupUsername: targetChatUsername},
+				})
 				finalChatID = chat.ID
 			}
 
@@ -286,14 +310,11 @@ func handleMessage(bot *tgbotapi.BotAPI, update tgbotapi.Update) {
 				log.Printf("Xatolik: %v", err)
 				bot.Send(tgbotapi.NewMessage(chatID, "❌ Xatolik: "+err.Error()))
 			} else {
-				// STATISTIKANI YANGILASH (Siz so'ragandek)
-				updatePostStats(userID, finalChatID) // Bu funksiyani pastda yozamiz
-
+				updatePostStats(userID, finalChatID)
 				bot.Send(tgbotapi.NewMessage(chatID, "🚀 Reklama muvaffaqiyatli yuborildi!"))
 			}
 
 			resetUserState(bot, chatID, userID)
-
 		case "✅ So'rovlarni tasdiqlash":
 			bot.Send(tgbotapi.NewMessage(chatID, "Kanal ID-sini yuboring yoki xabarni forward qiling:"))
 			adminState[userID] = "wait_for_approve_id"
@@ -323,7 +344,13 @@ func handleMessage(bot *tgbotapi.BotAPI, update tgbotapi.Update) {
 				bot.Send(m)
 			}
 
+		case "add_custom_button":
+			userState[userID] = "WAITING_BTN_TEXT"
+			msg := tgbotapi.NewMessage(chatID, "Tugma matnini kiriting (masalan: Bizga qo'shiling):")
+			bot.Send(msg)
+
 		}
+
 	}
 	// handleMessage ichida forwardni tutgan joyingizda:
 	// 3. Asosiy buyruqlar
@@ -482,6 +509,26 @@ func handleCallback(bot *tgbotapi.BotAPI, update tgbotapi.Update) {
 	messageID := cb.Message.MessageID
 
 	switch {
+	case data == "add_url_button":
+		adminState[userID] = "wait_btn_text" // Holatni o'zgartiramiz
+
+		// Foydalanuvchiga xabar yuboramiz
+		msg := tgbotapi.NewMessage(chatID, "⚙️ **Tugma matnini kiriting:**\n(Masalan: Tomosha qilish yoki pastdagi variantlardan birini tanlang)")
+
+		// handleMessage dagi o'sha 8 ta tayyor tugmani shu yerda ham ko'rsatish mumkin
+		keyboard := tgbotapi.NewReplyKeyboard(
+			tgbotapi.NewKeyboardButtonRow(
+				tgbotapi.NewKeyboardButton("Tomosha qilish"),
+				tgbotapi.NewKeyboardButton("Yuklab olish"),
+			),
+			tgbotapi.NewKeyboardButtonRow(
+				tgbotapi.NewKeyboardButton("❌ Bekor qilish"),
+			),
+		)
+		keyboard.ResizeKeyboard = true
+		msg.ReplyMarkup = keyboard
+		bot.Send(msg)
+		// --------------------------------
 	// 1. Reklama yuborish qismi (avvalgi mantiqdan)
 	case data == "start_sending":
 		adminState[userID] = "wait_target_channel"
@@ -635,8 +682,13 @@ func handleMediaInput(bot *tgbotapi.BotAPI, update tgbotapi.Update) {
 
 func sendPreview(bot *tgbotapi.BotAPI, chatID int64, userID int64) {
 	data := userAdData[userID]
+
+	// Ikkita tugmali klaviatura: "Uzatish" va "Tugma qo'shish"
 	keyboard := tgbotapi.NewInlineKeyboardMarkup(
-		tgbotapi.NewInlineKeyboardRow(tgbotapi.NewInlineKeyboardButtonData("📤 Uzatish", "start_sending")),
+		tgbotapi.NewInlineKeyboardRow(
+			tgbotapi.NewInlineKeyboardButtonData("📤 Uzatish", "start_sending"),
+			tgbotapi.NewInlineKeyboardButtonData("➕ Tugma qo'shish", "add_url_button"),
+		),
 	)
 
 	if !data.HasMedia {
