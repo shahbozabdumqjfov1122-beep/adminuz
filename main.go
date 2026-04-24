@@ -46,10 +46,28 @@ type AdData struct {
 	Buttons    []CustomButton // Tugmalar ro'yxati
 	TempButton string         // Vaqtincha matnni saqlab turish uchun (MUHIM)
 }
+type UserChannels struct {
+	Channels []string `json:"channels"`
+}
+
+var storageFile = "user_channels.json"
+
+type ChannelInfo struct {
+	ID   string `json:"id"`
+	Name string `json:"name"`
+}
+
+type UserData struct {
+	Channels []ChannelInfo `json:"channels"`
+}
+
+type GlobalStorage struct {
+	Users map[int64]*UserData `json:"users"`
+}
 
 var (
 	//botToken = "8534860816:AAEH3QSbf9bj5vr4ARG7tbusvC70WpZgdqY"
-	//botToken     = "8615833296:AAHD0Xvoz0HOXv42RFxTVzdPcV1ev7JCJ8E"
+	//botToken = "8534860816:AAEH3QSbf9bj5vr4ARG7tbusvC70WpZgdqY"
 	botToken     = "8467228808:AAE6vNO3wu3dvlrnNi2RNy90qwvGp77ErT8"
 	adminState   = make(map[int64]string)
 	userAdData   = make(map[int64]*AdData)
@@ -96,17 +114,34 @@ func handleMessage(bot *tgbotapi.BotAPI, update tgbotapi.Update) {
 	chatID := msg.Chat.ID
 	text := msg.Text
 
-	if text == "❌ Bekor qilish" {
-		resetUserState(bot, chatID, userID)
-		return
-	}
-	if text == "/start" {
+	if text == "❌ Bekor qilish" || text == "/start" {
 		resetUserState(bot, chatID, userID)
 		return
 	}
 	// Avval foydalanuvchining holatini (state) aniqlab olamiz
 	state, ok := adminState[userID]
 
+	if update.Message != nil {
+		userID := update.Message.From.ID
+
+		if adminState[userID] == "wait_channel_input" {
+			var cID, cName string
+
+			if update.Message.ForwardFromChat != nil {
+				cID = fmt.Sprintf("%d", update.Message.ForwardFromChat.ID)
+				cName = update.Message.ForwardFromChat.Title
+			} else {
+				cID = update.Message.Text
+				// Agar qo'lda username yozsa (@kanal), nom sifatida ushbu matnni olamiz
+				cName = update.Message.Text
+			}
+
+			saveToDB(userID, cID, cName) // ID va Nomini saqlash
+
+			adminState[userID] = ""
+			bot.Send(tgbotapi.NewMessage(chatID, "✅ "+cName+" muvaffaqiyatli saqlandi!"))
+		}
+	}
 	if ok {
 		// 1. Link kutish holatini tekshirish (Prefix orqali)
 		if strings.HasPrefix(state, "wait_link_") {
@@ -215,20 +250,40 @@ func handleMessage(bot *tgbotapi.BotAPI, update tgbotapi.Update) {
 			data.Buttons = append(data.Buttons, newBtn)
 
 			adminState[userID] = ""
-			bot.Send(tgbotapi.NewMessage(chatID, "✅ Tugma qo'shildi!"))
+			bot.Send(tgbotapi.NewMessage(chatID, ""))
 			sendPreview(bot, chatID, userID)
 			return
 
 		case "start_sending":
-			adminState[userID] = "wait_target_channel"
-			// Bu yerda @kanal_nomi dagi pastki chiziqni olib tashladik yoki Markdown'ni to'g'irladik
-			text := "🔗 **Reklama yuboriladigan kanalni tanlang:**\n\n" +
-				"1. Kanaldan birorta xabarni shu yerga **Forward** qiling.\n" +
-				"2. Yoki kanal linkini yuboring (masalan: @kanal)\n" +
-				"3. Yoki kanal ID raqamini yuboring."
+			db := loadDB()
+			var rows [][]tgbotapi.InlineKeyboardButton
 
-			msg := tgbotapi.NewMessage(chatID, text)
-			msg.ParseMode = "Markdown" // Yoki bu qatorni umuman o'chirib tashlang, agar format shart bo'lmasa
+			// 1. Kanallar ro'yxati (Har biri alohida qatorda)
+			if user, ok := db.Users[userID]; ok && len(user.Channels) > 0 {
+				for _, ch := range user.Channels {
+					btnRow := tgbotapi.NewInlineKeyboardRow(
+						tgbotapi.NewInlineKeyboardButtonData(" "+ch.Name, "select_channel:"+ch.ID),
+					)
+					rows = append(rows, btnRow)
+				}
+			}
+
+			// 2. "Qo'shish" tugmasi alohida qatorda
+			addBtnRow := tgbotapi.NewInlineKeyboardRow(
+				tgbotapi.NewInlineKeyboardButtonData("➕ Qo'shish", "add_new_to_list"),
+			)
+			rows = append(rows, addBtnRow)
+
+			// 3. "O'chirish" tugmasi alohida qatorda
+			deleteBtnRow := tgbotapi.NewInlineKeyboardRow(
+				tgbotapi.NewInlineKeyboardButtonData("🗑 O'chirish", "show_delete_list"),
+			)
+			rows = append(rows, deleteBtnRow)
+
+			// Xabarni yuborish
+			msg := tgbotapi.NewMessage(chatID, "🔗 Kanalni tanlang: yoki ozingiz qo'shing \n  nma shuni ham men qoshib berimi?")
+			msg.ParseMode = "Markdown"
+			msg.ReplyMarkup = tgbotapi.NewInlineKeyboardMarkup(rows...)
 			bot.Send(msg)
 		case "wait_target_channel":
 			var targetChatID int64
@@ -344,12 +399,10 @@ func handleMessage(bot *tgbotapi.BotAPI, update tgbotapi.Update) {
 				m.ReplyMarkup = keyboard
 				bot.Send(m)
 			}
-
 		case "add_custom_button":
 			userState[userID] = "WAITING_BTN_TEXT"
 			msg := tgbotapi.NewMessage(chatID, "Tugma matnini kiriting (masalan: Bizga qo'shiling):")
 			bot.Send(msg)
-
 		}
 
 	}
@@ -417,6 +470,134 @@ func handleMessage(bot *tgbotapi.BotAPI, update tgbotapi.Update) {
 	}
 }
 
+func loadDB() GlobalStorage {
+	var db GlobalStorage
+	db.Users = make(map[int64]*UserData) // Mapni inisializatsiya qilish
+
+	file, err := os.ReadFile("user_channels.json")
+	if err != nil {
+		return db
+	}
+
+	// JSON'da kalitlar string ("7518992824") bo'ladi.
+	// Shuning uchun uni map[string]UserData ko'rinishida vaqtincha o'qiymiz
+	var temp map[string]map[string]UserData
+	err = json.Unmarshal(file, &temp)
+	if err != nil {
+		return db
+	}
+
+	// Vaqtinchalik mapdan asosiy GlobalStorage'ga o'tkazamiz
+	if users, ok := temp["users"]; ok {
+		for sID, data := range users {
+			id, _ := strconv.ParseInt(sID, 10, 64)
+			db.Users[id] = &UserData{
+				Channels: data.Channels,
+			}
+		}
+	}
+	return db
+}
+
+func saveToDB(userID int64, channelID string, channelName string) {
+	db := loadDB() // Oldingi javobdagi yuklash funksiyasi
+	if _, ok := db.Users[userID]; !ok {
+		db.Users[userID] = &UserData{}
+	}
+
+	// Takrorlanmaslik uchun tekshirish
+	for _, c := range db.Users[userID].Channels {
+		if c.ID == channelID {
+			return
+		}
+	}
+
+	db.Users[userID].Channels = append(db.Users[userID].Channels, ChannelInfo{
+		ID:   channelID,
+		Name: channelName,
+	})
+
+	data, _ := json.MarshalIndent(db, "", "  ")
+	os.WriteFile("user_channels.json", data, 0644)
+}
+
+func sendAdToChannel(bot *tgbotapi.BotAPI, targetChatID int64, userID int64, chatID int64) {
+	// 1. Reklama ma'lumotlarini tekshirish
+	data := userAdData[userID]
+	if data == nil {
+		bot.Send(tgbotapi.NewMessage(chatID, "⚠️ Reklama ma'lumotlari topilmadi."))
+		return
+	}
+
+	// 2. Botning adminligini tekshirish
+	if !checkAdmin(bot, targetChatID, bot.Self.ID) {
+		bot.Send(tgbotapi.NewMessage(chatID, "🚫 Bot ushbu kanalda admin emas! Iltimos, avval botga adminlik huquqini bering."))
+		return
+	}
+
+	// 3. Foydalanuvchining adminligini tekshirish
+	if !checkAdmin(bot, targetChatID, userID) {
+		bot.Send(tgbotapi.NewMessage(chatID, "🚫 Siz ushbu kanalda admin emassiz! Reklama yuborishga ruxsat yo'q."))
+		return
+	}
+
+	// 4. Caption (tavsif) qismiga ID-larni qo'shish
+	// Siz so'ragandek foydalanuvchi va bot ID-sini matn oxiriga qo'shamiz
+	finalCaption := fmt.Sprintf("%s", data.Caption)
+
+	// 5. Tugmalarni shakllantirish
+	var rows [][]tgbotapi.InlineKeyboardButton
+	for _, b := range data.Buttons {
+		btn := tgbotapi.NewInlineKeyboardButtonURL(b.Text, b.Link)
+		rows = append(rows, tgbotapi.NewInlineKeyboardRow(btn))
+	}
+	keyboard := tgbotapi.NewInlineKeyboardMarkup(rows...)
+
+	// 6. Xabarni tayyorlash va yuborish
+	var sendTo tgbotapi.Chattable
+
+	if !data.HasMedia {
+		m := tgbotapi.NewMessage(targetChatID, finalCaption)
+		m.ReplyMarkup = keyboard
+		sendTo = m
+	} else if data.IsVideo {
+		v := tgbotapi.NewVideo(targetChatID, tgbotapi.FileID(data.FileID))
+		v.Caption = finalCaption
+		v.ReplyMarkup = keyboard
+		sendTo = v
+	} else {
+		p := tgbotapi.NewPhoto(targetChatID, tgbotapi.FileID(data.FileID))
+		p.Caption = finalCaption
+		p.ReplyMarkup = keyboard
+		sendTo = p
+	}
+
+	// 7. Yuborish natijasini tekshirish
+	_, err := bot.Send(sendTo)
+	if err != nil {
+		log.Printf("Yuborishda xatolik: %v", err)
+		bot.Send(tgbotapi.NewMessage(chatID, "❌ Xatolik yuz berdi: "+err.Error()))
+	} else {
+		successMsg := fmt.Sprintf("🚀 Reklama muvaffaqiyatli yuborildi!\n\n📍 Kanal: %d\n👤 Yubordi: %d", targetChatID, userID)
+		bot.Send(tgbotapi.NewMessage(chatID, successMsg))
+
+		// Holatni tozalash
+		resetUserState(bot, chatID, userID)
+	}
+}
+func checkAdmin(bot *tgbotapi.BotAPI, channelID int64, userID int64) bool {
+	member, err := bot.GetChatMember(tgbotapi.GetChatMemberConfig{
+		ChatConfigWithUser: tgbotapi.ChatConfigWithUser{
+			ChatID: channelID,
+			UserID: userID,
+		},
+	})
+	if err != nil {
+		return false
+	}
+	// Foydalanuvchi yoki bot admin yoki kanal egasi bo'lishi kerak
+	return member.IsAdministrator() || member.IsCreator()
+}
 func HandleAutoApprove(bot *tgbotapi.BotAPI, request *tgbotapi.ChatJoinRequest) {
 	channelID := request.Chat.ID
 	userID := request.From.ID
@@ -504,10 +685,37 @@ func SetupJoinRequest(bot *tgbotapi.BotAPI, update tgbotapi.Update) {
 
 func handleCallback(bot *tgbotapi.BotAPI, update tgbotapi.Update) {
 	cb := update.CallbackQuery
-	data := cb.Data
+	data := cb.Data // Callback ma'lumoti
 	userID := cb.From.ID
 	chatID := cb.Message.Chat.ID
 	messageID := cb.Message.MessageID
+
+	// 1. Prefiksli shartlarni tekshirish
+	if strings.HasPrefix(data, "select_channel:") {
+		idStr := strings.TrimPrefix(data, "select_channel:")
+		channelID, _ := strconv.ParseInt(idStr, 10, 64)
+
+		sendAdToChannel(bot, channelID, userID, chatID)
+		bot.Request(tgbotapi.NewCallback(cb.ID, "Yuborildi!"))
+		return
+	}
+
+	// CallbackQuery ichida:
+	if update.CallbackQuery.Data == "add_new_channel" {
+		adminState[userID] = "wait_channel_input" // Yangi holat
+		msg := tgbotapi.NewMessage(chatID, "Kanal linkini yoki ID sini yuboring:")
+		bot.Send(msg)
+	}
+
+	// Message handle ichida (wait_channel_input holatida):
+	if adminState[userID] == "wait_channel_input" {
+		channelInput := update.Message.Text // yoki Forward'dan ID ni olish
+		saveUserChannel(userID, channelInput)
+
+		msg := tgbotapi.NewMessage(chatID, "✅ Kanal saqlandi! Endi qaytadan 'start_sending' tugmasini bosing.")
+		adminState[userID] = ""
+		bot.Send(msg)
+	}
 
 	switch {
 	case data == "add_url_button":
@@ -552,16 +760,6 @@ func handleCallback(bot *tgbotapi.BotAPI, update tgbotapi.Update) {
 		msg.ReplyMarkup = keyboard
 		bot.Send(msg)
 		// --------------------------------
-	// 1. Reklama yuborish qismi (avvalgi mantiqdan)
-	case data == "start_sending":
-		adminState[userID] = "wait_target_channel"
-		text := "🔗 **Reklama yuboriladigan kanalni tanlang:**\n\n" +
-			"1. Kanaldan xabarni **Forward** qiling.\n" +
-			"2. Yoki kanal ID/Username yuboring."
-		msg := tgbotapi.NewMessage(chatID, text)
-		msg.ParseMode = "Markdown"
-		bot.Send(msg)
-
 	// 2. Avto-qabulni rad etish
 	case data == "decline" || data == "cancel_accept":
 		delete(adminState, userID)
@@ -627,14 +825,143 @@ func handleCallback(bot *tgbotapi.BotAPI, update tgbotapi.Update) {
 			"✅ **Kanal muvaffaqiyatli ulandi!**\n\nEndi ushbu kanalga keladigan barcha qo'shilish so'rovlari navbatga yig'iladi.")
 		edit.ParseMode = "Markdown"
 		bot.Send(edit)
-		// Callback aylanib turmasligi uchun javob beramiz
+	// Callback aylanib turmasligi uchun javob beramiz
 
+	case data == "start_sending":
+		db := loadDB()
+		var rows [][]tgbotapi.InlineKeyboardButton
+
+		// 1. Kanallar ro'yxati (Har biri alohida qatorda)
+		if user, ok := db.Users[userID]; ok && len(user.Channels) > 0 {
+			for _, ch := range user.Channels {
+				btnRow := tgbotapi.NewInlineKeyboardRow(
+					tgbotapi.NewInlineKeyboardButtonData(""+ch.Name, "select_channel:"+ch.ID),
+				)
+				rows = append(rows, btnRow)
+			}
+		}
+
+		// 2. "Qo'shish" tugmasi alohida qatorda
+		addBtnRow := tgbotapi.NewInlineKeyboardRow(
+			tgbotapi.NewInlineKeyboardButtonData("➕ Qo'shish", "add_new_to_list"),
+		)
+		rows = append(rows, addBtnRow)
+
+		// 3. "O'chirish" tugmasi alohida qatorda
+		deleteBtnRow := tgbotapi.NewInlineKeyboardRow(
+			tgbotapi.NewInlineKeyboardButtonData("🗑 O'chirish", "show_delete_list"),
+		)
+		rows = append(rows, deleteBtnRow)
+
+		// Xabarni yuborish
+		msg := tgbotapi.NewMessage(chatID, "🔗 Kanalni tanlang: yoki ozingiz qo'shing \n  nma shuni ham men qoshib berimi?")
+		msg.ParseMode = "Markdown"
+		msg.ReplyMarkup = tgbotapi.NewInlineKeyboardMarkup(rows...)
+		bot.Send(msg)
+
+	case data == "add_new_to_list":
+		adminState[userID] = "wait_channel_input" // Holatni o'zgartiramiz
+		msg := tgbotapi.NewMessage(chatID, "📥 Kanal ID'sini yuboring yoki birorta xabarni shu kanaldan **Forward** qiling:")
+		bot.Send(msg)
+
+	case data == "show_delete_list":
+		db := loadDB()
+		var rows [][]tgbotapi.InlineKeyboardButton
+
+		if user, ok := db.Users[userID]; ok && len(user.Channels) > 0 {
+			for _, ch := range user.Channels {
+				// Bu yerdagi callback "delete_confirm:" bilan boshlanadi
+				btn := tgbotapi.NewInlineKeyboardRow(
+					tgbotapi.NewInlineKeyboardButtonData("❌ "+ch.Name, "delete_confirm:"+ch.ID),
+				)
+				rows = append(rows, btn)
+			}
+
+			// Orqaga qaytish tugmasi
+			rows = append(rows, tgbotapi.NewInlineKeyboardRow(
+				tgbotapi.NewInlineKeyboardButtonData("⬅️ Orqaga", "start_sending"),
+			))
+
+			msg := tgbotapi.NewEditMessageText(chatID, messageID, "🗑 **Qaysi kanalni o'chirmoqchisiz?**\nUstiga bossangiz, kanal ro'yxatdan o'chib ketadi.")
+			msg.ParseMode = "Markdown"
+			msg.ReplyMarkup = &tgbotapi.InlineKeyboardMarkup{InlineKeyboard: rows}
+			bot.Send(msg)
+		} else {
+			// NewCallback - bu javob konfiguratsiyasini yaratadi
+			callbackCfg := tgbotapi.NewCallback(cb.ID, "O'chirish uchun kanallar yo'q!")
+
+			// bot.Request orqali Telegramga yuboramiz
+			if _, err := bot.Request(callbackCfg); err != nil {
+				log.Println("Callback javobida xatolik:", err)
+			}
+		}
 	}
+	if strings.HasPrefix(data, "delete_confirm:") {
+		channelIDToDelete := strings.TrimPrefix(data, "delete_confirm:")
 
-	// Tugmadagi "yuklanish" aylanasini to'xtatish
+		db := loadDB()
+		if user, ok := db.Users[userID]; ok {
+			var updated []ChannelInfo
+			found := false
+			for _, ch := range user.Channels {
+				if ch.ID != channelIDToDelete {
+					updated = append(updated, ch)
+				} else {
+					found = true
+				}
+			}
+
+			if found {
+				// 1. Ma'lumotni yangilaymiz va saqlaymiz
+				db.Users[userID].Channels = updated
+				saveDB(db)
+
+				// 2. Callback'ga javob beramiz (Xatoni to'g'irladik: bot.Request)
+				bot.Request(tgbotapi.NewCallback(cb.ID, "Kanal o'chirildi! ✅"))
+
+				// 3. Ro'yxatni yangilab ko'rsatamiz (Xabarni tahrirlash)
+				var rows [][]tgbotapi.InlineKeyboardButton
+				if len(updated) > 0 {
+					for _, ch := range updated {
+						btn := tgbotapi.NewInlineKeyboardRow(
+							tgbotapi.NewInlineKeyboardButtonData("❌ "+ch.Name, "delete_confirm:"+ch.ID),
+						)
+						rows = append(rows, btn)
+					}
+					rows = append(rows, tgbotapi.NewInlineKeyboardRow(
+						tgbotapi.NewInlineKeyboardButtonData("⬅️ Orqaga", "start_sending"),
+					))
+
+					edit := tgbotapi.NewEditMessageText(chatID, cb.Message.MessageID, "🗑 **Kanal o'chirildi.** Yana birortasini o'chirasizmi?")
+					edit.ParseMode = "Markdown"
+					edit.ReplyMarkup = &tgbotapi.InlineKeyboardMarkup{InlineKeyboard: rows}
+					bot.Send(edit)
+				} else {
+					// Agar boshqa kanal qolmagan bo'lsa
+					edit := tgbotapi.NewEditMessageText(chatID, cb.Message.MessageID, "✅ Barcha kanallar o'chirildi.")
+					backBtn := tgbotapi.NewInlineKeyboardMarkup(
+						tgbotapi.NewInlineKeyboardRow(tgbotapi.NewInlineKeyboardButtonData("⬅️ Orqaga", "start_sending")),
+					)
+					edit.ReplyMarkup = &backBtn
+					bot.Send(edit)
+				}
+				return
+			}
+		}
+	} // Tugmadagi "yuklanish" aylanasini to'xtatish
 	bot.Request(tgbotapi.NewCallback(cb.ID, ""))
 }
-
+func saveDB(db GlobalStorage) {
+	data, err := json.MarshalIndent(db, "", "  ")
+	if err != nil {
+		log.Println("JSON marshaling hatosi:", err)
+		return
+	}
+	err = os.WriteFile("user_channels.json", data, 0644)
+	if err != nil {
+		log.Println("Faylga yozishda xato:", err)
+	}
+}
 func getMainMenu() tgbotapi.ReplyKeyboardMarkup {
 	keyboard := tgbotapi.NewReplyKeyboard(
 		tgbotapi.NewKeyboardButtonRow(tgbotapi.NewKeyboardButton("📣 Reklama tayyorlash")),
@@ -820,4 +1147,37 @@ func updatePostStats(ownerID int64, channelID int64) {
 		cfg.LastPostTime = time.Now() // Endi bu ham ishlaydi
 		SaveConfig(cfg)
 	}
+}
+
+func saveUserChannel(userID int64, channelID string) {
+	data, _ := os.ReadFile(storageFile)
+	allData := make(map[string]UserChannels)
+	json.Unmarshal(data, &allData)
+
+	user := allData[fmt.Sprint(userID)]
+	// Kanal allaqachon borligini tekshirish
+	for _, ch := range user.Channels {
+		if ch == channelID {
+			return
+		}
+	}
+	user.Channels = append(user.Channels, channelID)
+	allData[fmt.Sprint(userID)] = user
+
+	newData, _ := json.MarshalIndent(allData, "", "  ")
+	os.WriteFile(storageFile, newData, 0644)
+}
+
+func isAdmin(bot *tgbotapi.BotAPI, channelID int64, userID int64) bool {
+	member, err := bot.GetChatMember(tgbotapi.GetChatMemberConfig{
+		ChatConfigWithUser: tgbotapi.ChatConfigWithUser{
+			ChatID: channelID,
+			UserID: userID,
+		},
+	})
+	if err != nil {
+		return false
+	}
+	// Creator (egasi) yoki Administrator bo'lsa true qaytaradi
+	return member.IsAdministrator() || member.IsCreator()
 }
