@@ -68,7 +68,7 @@ type GlobalStorage struct {
 var (
 	//botToken = "8534860816:AAEH3QSbf9bj5vr4ARG7tbusvC70WpZgdqY"
 	//botToken = "8534860816:AAEH3QSbf9bj5vr4ARG7tbusvC70WpZgdqY"
-	botToken     = "8467228808:AAE6vNO3wu3dvlrnNi2RNy90qwvGp77ErT8"
+	botToken     = "8467228808:AAGQu8TdKykQy2dZlzyY9DD2TklIDwoDe2U"
 	adminState   = make(map[int64]string)
 	userAdData   = make(map[int64]*AdData)
 	channelLinks = make(map[int64]string)
