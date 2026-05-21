@@ -248,7 +248,8 @@ func handleMessage(bot *tgbotapi.BotAPI, update tgbotapi.Update) {
 
 		_, err = bot.Send(sendTo)
 		if err != nil {
-			bot.Send(tgbotapi.NewMessage(chatID, "❌ Xatolik: "+err.Error()))
+			log.Printf("Xatolik: %v", err)
+			bot.Send(tgbotapi.NewMessage(chatID, "❌ Xatolik yuz berdi. Qayta urinib ko'ring."))
 		} else {
 			bot.Send(tgbotapi.NewMessage(chatID, "🚀 Reklama muvaffaqiyatli yuborildi!"))
 		}
