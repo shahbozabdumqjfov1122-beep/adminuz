@@ -299,7 +299,16 @@ func handleMessage(bot *tgbotapi.BotAPI, update tgbotapi.Update) {
 	case "📣 Reklama tayyorlash":
 		startAdCreation(bot, chatID, userID)
 	default:
-		m := tgbotapi.NewMessage(chatID, "Salom! 👋\n\nReklama tayyorlash uchun tugmani bosing.")
+		m := tgbotapi.NewMessage(chatID,
+			"Salom! 👋\n\n"+
+				"• Reklama tayyorlash uchun tugmani bosing.\n\n"+
+				"• Bot yangilandi:\n"+
+				"• Reklamani bir vaqtda 5 tagacha kanalga yuborish mumkin\n"+
+				"• Tugma linki eslab qolinadi, keyingi safar faqat kodni yozasiz\n"+
+				"• Yuborilgach, postga olib boruvchi link chiqadi\n"+
+				"• Kanalni o'chirish tuzatildi\n"+
+				"• Bot ishlamasa /start bosing 🔄\n"+
+				"• Baribir ishlamasa, lichkamga boshimni og'ritib yozmanglar 🗿")
 		m.ReplyMarkup = getMainMenu()
 		bot.Send(m)
 	}
@@ -881,16 +890,14 @@ func resetUserState(bot *tgbotapi.BotAPI, chatID int64, userID int64) {
 	delete(selectedChannels, userID)
 	msg := tgbotapi.NewMessage(chatID,
 		"Salom! 👋\n\n"+
-			"Reklama tayyorlash uchun tugmani bosing.\n\n"+
-			"🆕 Bot yangilandi:\n"+
+			"• Reklama tayyorlash uchun tugmani bosing.\n\n"+
+			"• Bot yangilandi:\n"+
 			"• Reklamani bir vaqtda 5 tagacha kanalga yuborish mumkin\n"+
 			"• Tugma linki eslab qolinadi, keyingi safar faqat kodni yozasiz\n"+
 			"• Yuborilgach, postga olib boruvchi link chiqadi\n"+
-			"• Kanalni o'chirish tuzatildi\n\n"+
-			"Bot ishlamasa /start bosing 🔄\n"+
-			"Baribir ishlamasa, lichkamga boshimni og'ritib yozmanglar 🗿")
-	msg.ReplyMarkup = getMainMenu()
-	bot.Send(msg)
+			"• Kanalni o'chirish tuzatildi\n"+
+			"• Bot ishlamasa /start bosing 🔄\n"+
+			"• Baribir ishlamasa, lichkamga boshimni og'ritib yozmanglar 🗿")
 	msg.ReplyMarkup = getMainMenu()
 	bot.Send(msg)
 }
