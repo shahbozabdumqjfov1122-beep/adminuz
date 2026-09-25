@@ -85,7 +85,7 @@ func handleMessage(bot *tgbotapi.BotAPI, update tgbotapi.Update) {
 	chatID := msg.Chat.ID
 	text := msg.Text
 
-	if text == "❌ Bekor qilish" || text == "/start" {
+	if text == "❌ Bekor qilish" || text == "/start" || text == "⬅️ Orqaga" {
 		resetUserState(bot, chatID, userID)
 		return
 	}
@@ -298,6 +298,8 @@ func handleMessage(bot *tgbotapi.BotAPI, update tgbotapi.Update) {
 	switch text {
 	case "📣 Reklama tayyorlash":
 		startAdCreation(bot, chatID, userID)
+	case "ℹ️ Bot haqida":
+		startAdCreation2(bot, chatID, userID)
 	default:
 		m := tgbotapi.NewMessage(chatID,
 			"Salom! 👋\n\n"+
@@ -418,7 +420,7 @@ func handleCallback(bot *tgbotapi.BotAPI, update tgbotapi.Update) {
 
 		var report strings.Builder
 		var linkRows [][]tgbotapi.InlineKeyboardButton
-		report.WriteString("📊 Natija:\n\n")
+		report.WriteString("📨 Natija:\n\n")
 
 		db := loadDB()
 		if user, ok := db.Users[userID]; ok {
@@ -802,6 +804,7 @@ func saveDB(db GlobalStorage) {
 func getMainMenu() tgbotapi.ReplyKeyboardMarkup {
 	keyboard := tgbotapi.NewReplyKeyboard(
 		tgbotapi.NewKeyboardButtonRow(tgbotapi.NewKeyboardButton("📣 Reklama tayyorlash")),
+		tgbotapi.NewKeyboardButtonRow(tgbotapi.NewKeyboardButton("ℹ️ Bot haqida")),
 	)
 	keyboard.ResizeKeyboard = true
 	return keyboard
@@ -824,10 +827,64 @@ func getMediaMenu() tgbotapi.ReplyKeyboardMarkup {
 	return keyboard
 }
 
+func getMediaMenu2() tgbotapi.ReplyKeyboardMarkup {
+	keyboard := tgbotapi.NewReplyKeyboard(
+		tgbotapi.NewKeyboardButtonRow(tgbotapi.NewKeyboardButton("⬅️ Orqaga")),
+	)
+	keyboard.ResizeKeyboard = true
+	return keyboard
+}
+
 func startAdCreation(bot *tgbotapi.BotAPI, chatID int64, userID int64) {
 	adminState[userID] = "wait_media"
-	msg := tgbotapi.NewMessage(chatID, "📸 Rasm yoki 📹 video yuboring:")
+	text := "📸 Rasm yoki 📹 video yuboring\n\n" +
+		"<pre>" +
+		"Reklama uchun surat yoki video tanlang.\nMediasiz, faqat matn bilan davom etish uchun\n\"Tashlab ketish\" tugmasini bosing." +
+		"</pre>"
+
+	msg := tgbotapi.NewMessage(chatID, text)
+	msg.ParseMode = "HTML"
 	msg.ReplyMarkup = getMediaMenu()
+	bot.Send(msg)
+}
+
+func startAdCreation2(bot *tgbotapi.BotAPI, chatID int64, userID int64) {
+	text := "ℹ️ Bot haqida\n\n" +
+		"Bu bot orqali kanallaringizga reklama tayyorlab, bir necha bosqichda joylashtirishingiz mumkin.\n\n" +
+		"<pre>" +
+		"📣 REKLAMA TAYYORLASH — QADAMLAR\n" +
+		"────────────────────────\n\n" +
+		"1. Rasm/video yuborish\n" +
+		"   Mediasiz bo'lsa \"Tashlab ketish\"\n\n" +
+		"2. Matn kiritish\n" +
+		"   Rasm/video ostiga chiqadi\n\n" +
+		"3. Tugma matni\n" +
+		"   Masalan: Tomosha qilish\n\n" +
+		"4. Tugma linki\n" +
+		"   1-marta:  https://t.me/bot?start=1\n" +
+		"   Keyin:    faqat kod (masalan 100)\n" +
+		"   O'zgartirish: Linkni o'zgartirish\n\n" +
+		"5. Preview ko'rish\n" +
+		"   Tugma qo'shish yoki Uzatish\n\n" +
+		"6. Kanal tanlash\n" +
+		"   1-5 tagacha, Qo'shish / O'chirish\n\n" +
+		"7. Yuborish\n" +
+		"   Har kanal uchun natija:\n" +
+		"   OK   - muvaffaqiyatli\n" +
+		"   XATO - sababi bilan\n\n" +
+		"────────────────────────\n" +
+		"SHARTLAR\n" +
+		"────────────────────────\n" +
+		"- Bot kanalda admin bo'lishi shart\n" +
+		"- Siz ham admin bo'lishingiz kerak\n" +
+		"- Har safar 1-5 ta kanal\n" +
+		"</pre>\n\n" +
+		"Bekor qilish / Orqaga — istalgan bosqichda\n\n" +
+		"Savol: @Hao_aniuz"
+
+	msg := tgbotapi.NewMessage(chatID, text)
+	msg.ParseMode = "HTML"
+	msg.ReplyMarkup = getMediaMenu2()
 	bot.Send(msg)
 }
 
@@ -852,7 +909,21 @@ func handleMediaInput(bot *tgbotapi.BotAPI, update tgbotapi.Update) {
 	}
 
 	adminState[userID] = "wait_text"
-	resp := tgbotapi.NewMessage(chatID, "✍️ Matnni kiriting:")
+	text2 := "✍️ Reklama matnini kiriting\n\n" +
+		"Bu matn rasm/video ostida chiqadi (caption).\n\n" +
+		"<pre>" +
+		"Naruto\n" +
+		"╭────────────────────\n" +
+		"├‣ Qism: 720\n" +
+		"├‣ Davlat: Yaponiya\n" +
+		"├‣ Tili: Uzbek tilida\n" +
+		"├‣ Holati: tugallangan\n" +
+		"├‣ Kanal: @bot_yasash1\n" +
+		"╰────────────────────" +
+		"</pre>"
+
+	resp := tgbotapi.NewMessage(chatID, text2)
+	resp.ParseMode = "HTML"
 	resp.ReplyMarkup = getCancelMenu()
 	bot.Send(resp)
 }
@@ -961,7 +1032,15 @@ func askForLink(bot *tgbotapi.BotAPI, chatID int64, userID int64) {
 		return
 	}
 
-	m := tgbotapi.NewMessage(chatID, "🔗 Kodni yuboring (raqam yoki harf):")
+	text := "🔗 Kodni yuboring\n\n" +
+		"<pre>" +
+		"Misol:\n" +
+		"Siz yuborasiz:  1\n" +
+		"Natija:  " + base + "1" +
+		"</pre>"
+
+	m := tgbotapi.NewMessage(chatID, text)
+	m.ParseMode = "HTML"
 	m.ReplyMarkup = getCancelMenu()
 	bot.Send(m)
 
